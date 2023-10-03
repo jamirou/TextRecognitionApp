@@ -2,6 +2,8 @@ package com.example.textrecognitionapp.views
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.rememberAsyncImagePainter
 import com.example.textrecognitionapp.R
@@ -48,15 +51,26 @@ fun CameraView(viewModel: ScannerViewModel) {
         context.packageName + ".provider", file
     )
 
-    var image: Any? by remember { mutableStateOf(R.drawable.ic_gallery) }
-    val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
+    var image by remember { mutableStateOf<Uri>(Uri.EMPTY) }
+    val imageDefault = R.drawable.ic_photo
+
+    val permissionCheckResult =
+        ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA)
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) {
+        image = uri
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
     ) {
         if (it != null) {
-            image = it
-            viewModel.onRecognizedText(image, context)
+            viewModel.showToast(context, "Permission granted")
+            cameraLauncher.launch(uri)
         } else {
-            viewModel.showToast(context, "no image selected")
+            viewModel.showToast(context, "Permission denied")
         }
     }
     Column(
@@ -67,22 +81,25 @@ fun CameraView(viewModel: ScannerViewModel) {
         Image(
             modifier = Modifier
                 .clickable {
-                    photoPicker.launch(
-                        PickVisualMediaRequest(
-                            ActivityResultContracts.PickVisualMedia.ImageOnly
-                        )
-                    )
+                    if (permissionCheckResult == PackageManager.PERMISSION_GRANTED) {
+                        cameraLauncher.launch(uri)
+                    } else {
+                        permissionLauncher.launch(android.Manifest.permission.CAMERA)
+                    }
                 }
                 .padding(16.dp, 8.dp),
-            painter = rememberAsyncImagePainter(image),
+            painter = rememberAsyncImagePainter(if (image.path?.isNotEmpty() == true) image else imageDefault),
             contentDescription = null
-        )
+        ).apply {
+            viewModel.onRecognizedText(image, context)
+        }
         Spacer(modifier = Modifier.height(25.dp))
         val scrollState = rememberScrollState()
         Text(
             text = viewModel.recognizedText,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
                 .verticalScroll(scrollState)
                 .clickable {
                     clipboard.setText(AnnotatedString(viewModel.recognizedText))
@@ -91,6 +108,7 @@ fun CameraView(viewModel: ScannerViewModel) {
         )
     }
 }
+
 @SuppressLint("SimpleDateFormat")
 fun Context.createImageFile(): File {
     val timeStamp = SimpleDateFormat("yyyyMMdd_HHss").format(Date())
